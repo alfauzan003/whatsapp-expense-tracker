@@ -151,7 +151,7 @@ function infoMessage() {
     return `
 👋 *Welcome to Your Personal Expense Bot!*
 
-This bot helps you track your daily expenses via WhatsApp and saves them to your personal Google Sheet.
+This bot helps you track your daily expenses via WhatsApp and saves them to your personal Sheet.
 
 🧰 *Features*:
 • 💸 Log expenses
@@ -164,15 +164,136 @@ This bot helps you track your daily expenses via WhatsApp and saves them to your
 Format: \`Category - Amount\`  
 Example: \`Lunch at cafe - 25000\`
 
+*/undo* - Delete the last entry 
 */today* - Show today’s expenses  
-*/yesterday* - Show yesterday's message  
-*/undo* - Delete the last entry  
+*/yesterday* - Show yesterday's expenses 
+*/weekly* - Show total expense on this week  
+*/monthly* - Show total expense on this month 
+*/export* - Export expenses on this month as Excel file  
 */info* - Show this message  
 
 
 ⚠️ *Note*: You must be registered by the bot admin.
     `;
 }
+
+async function handleRegister(msg) {
+    const phone = msg.from.replace(/@c\.us$/, "");
+    const exists = await getUser(phone);
+    if (exists) return msg.reply("✅ You are already registered.");
+    try {
+        await createUser(phone);
+        return msg.reply(
+            "🎉 Registration complete! You can now log your expenses.\nExample: `Makan siang - 5000`\n\nOr type `/info` for help."
+        );
+    } catch (err) {
+        console.error("❌ Registration error:", err);
+        return msg.reply("❌ Failed to register. Please try again.");
+    }
+}
+
+async function handleToday(msg, user_id) {
+    try {
+        const rows = await getTodayExpenses(user_id);
+        if (rows.length === 0) return msg.reply("📭 No expenses today.");
+
+        let reply = "📅 *Today's Expenses:*\n";
+        let total = 0;
+
+        rows.forEach((r) => {
+            const amount = formatRupiah(r.amount);
+            total += parseFloat(r.amount);
+            reply += `• ${r.category} - ${amount}\n`;
+        });
+        reply += `\n🧾 *Total*: ${formatRupiah(total)}`;
+        return msg.reply(reply);
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Could not fetch today's expenses.");
+    }
+}
+
+async function handleYesterday(msg, user_id) {
+    try {
+        const rows = await getYesterdayExpenses(user_id);
+        if (rows.length === 0) return msg.reply("📭 No expenses yesterday.");
+
+        let reply = "📅 *Yesterday's Expenses:*\n";
+        let total = 0;
+
+        rows.forEach((r) => {
+            const amount = formatRupiah(r.amount);
+            total += parseFloat(r.amount);
+            reply += `• ${r.category} - ${amount}\n`;
+        });
+        reply += `\n🧾 *Total*: ${formatRupiah(total)}`;
+        return msg.reply(reply);
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Could not fetch yesterday's expenses.");
+    }
+}
+
+async function handleWeekly(msg, user_id) {
+    try {
+        const total = await getWeeklyTotal(user_id);
+        return msg.reply(`📅 *This Week's Total*: ${formatRupiah(total)}`);
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Could not fetch this Week's expense.");
+    }
+}
+
+async function handleMonthly(msg, user_id) {
+    try {
+        const total = await getMonthlyTotal(user_id);
+        return msg.reply(`📆 *This Month's Total*: ${formatRupiah(total)}`);
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Could not fetch monthly total.");
+    }
+}
+
+async function handleUndo(msg, user_id) {
+    try {
+        await deleteLastRow(user_id);
+        return msg.reply("⏪ Last entry deleted.");
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Error deleting the last entry.");
+    }
+}
+
+async function handleExport(msg, user_id) {
+    try {
+        const filePath = await exportMonthlyExpenses(user_id);
+        const media = MessageMedia.fromFilePath(filePath);
+        await msg.reply("📦 Exporting monthly expense Excel files...");
+        await client.sendMessage(msg.from, media, {
+            sendMediaAsDocument: true,
+            caption: "📊 Monthly Expense Report",
+        });
+        fs.unlinkSync(filePath); // Clean up
+        return;
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Failed to export Excel file.");
+    }
+}
+
+async function handleInfo(msg) {
+    return msg.reply(infoMessage());
+}
+
+const commands = {
+    "/today": handleToday,
+    "/yesterday": handleYesterday,
+    "/weekly": handleWeekly,
+    "/monthly": handleMonthly,
+    "/undo": handleUndo,
+    "/export": handleExport,
+    "/info": handleInfo,
+};
 
 console.log("🚀 Starting bot...");
 
@@ -191,20 +312,10 @@ client.on("ready", () => {
 
 client.on("message", async (msg) => {
     const text = msg.body.trim();
-    const phone = msg.from;
+    const phone = msg.from.replace(/@c\.us$/, "");
 
     if (text === "/register") {
-        const exists = await getUser(phone);
-        if (exists) return msg.reply("✅ You are already registered.");
-        try {
-            await createUser(phone);
-            return msg.reply(
-                "🎉 Registration complete! You can now log your expenses."
-            );
-        } catch (err) {
-            console.error("❌ Registration error:", err);
-            return msg.reply("❌ Failed to register. Please try again.");
-        }
+        return handleRegister(msg); // no userId needed
     }
 
     const user_id = await getUser(phone);
@@ -212,104 +323,9 @@ client.on("message", async (msg) => {
         return msg.reply("🚫 You are not registered. Type /register to start.");
     }
 
-    // /today
-    if (text === "/today") {
-        try {
-            const rows = await getTodayExpenses(user_id);
-            if (rows.length === 0) return msg.reply("📭 No expenses today.");
-
-            let reply = "📅 *Today's Expenses:*\n";
-            let total = 0;
-
-            rows.forEach((r) => {
-                const amount = formatRupiah(r.amount);
-                total += parseFloat(r.amount);
-                reply += `• ${r.category} - ${amount}\n`;
-            });
-            reply += `\n🧾 *Total*: ${formatRupiah(total)}`;
-            return msg.reply(reply);
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Could not fetch today's expenses.");
-        }
-    }
-
-    // yesterday
-    if (text === "/yesterday") {
-        try {
-            const rows = await getYesterdayExpenses(user_id);
-            if (rows.length === 0)
-                return msg.reply("📭 No expenses yesterday.");
-
-            let reply = "📅 *Today's Expenses:*\n";
-            let total = 0;
-
-            rows.forEach((r) => {
-                const amount = formatRupiah(r.amount);
-                total += parseFloat(r.amount);
-                reply += `• ${r.category} - ${amount}\n`;
-            });
-            reply += `\n🧾 *Total*: ${formatRupiah(total)}`;
-            return msg.reply(reply);
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Could not fetch yesterday's expenses.");
-        }
-    }
-
-    // weekly
-    if (text === "/weekly") {
-        try {
-            const total = await getWeeklyTotal(user_id);
-            return msg.reply(`📅 *This Week's Total*: ${formatRupiah(total)}`);
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Could not fetch this Week's expense.");
-        }
-    }
-
-    // monthly
-    if (text === "/monthly") {
-        try {
-            const total = await getMonthlyTotal(user_id);
-            return msg.reply(`📆 *This Month's Total*: ${formatRupiah(total)}`);
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Could not fetch monthly total.");
-        }
-    }
-
-    // /undo
-    if (text === "/undo") {
-        try {
-            await deleteLastRow(user_id);
-            return msg.reply("⏪ Last entry deleted.");
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Error deleting the last entry.");
-        }
-    }
-
-    if (text === "/export") {
-        try {
-            const filePath = await exportMonthlyExpenses(user_id);
-            const media = MessageMedia.fromFilePath(filePath);
-            await msg.reply("📦 Exporting monthly expense Excel files...");
-            await client.sendMessage(msg.from, media, {
-                sendMediaAsDocument: true,
-                caption: "📊 Monthly Expense Report",
-            });
-            fs.unlinkSync(filePath); // Clean up
-            return;
-        } catch (err) {
-            console.error(err);
-            return msg.reply("❌ Failed to export Excel file.");
-        }
-    }
-
-    // /info
-    if (text === "/info") {
-        return msg.reply(infoMessage());
+    const command = commands[text];
+    if (command) {
+        return command(msg, user_id);
     }
 
     // Add expense

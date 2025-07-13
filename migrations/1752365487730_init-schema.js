@@ -5,7 +5,7 @@ exports.up = (pgm) => {
         id: {
             type: "uuid",
             primaryKey: true,
-            default: pgm.func("gen_random_uuid()"),
+            default: pgm.func("gen_random_ulid()"),
         },
         phone: { type: "text", unique: true, notNull: true },
         created_at: { type: "timestamptz", default: pgm.func("now()") },
@@ -15,7 +15,7 @@ exports.up = (pgm) => {
         id: {
             type: "uuid",
             primaryKey: true,
-            default: pgm.func("gen_random_uuid()"),
+            default: pgm.func("gen_random_ulid()"),
         },
         user_id: { type: "uuid", references: "users(id)" },
         category: { type: "text" },
