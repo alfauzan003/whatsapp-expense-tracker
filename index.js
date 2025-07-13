@@ -23,7 +23,7 @@ async function getUser(phone) {
     return result.rows[0]?.id || null;
 }
 
-// Sheet Actions
+// Actions
 async function addExpense(user_id, category, amount) {
     await pool.query(
         `INSERT INTO expenses (user_id, category, amount) VALUES ($1, $2, $3)`,
@@ -87,7 +87,7 @@ async function deleteLastRow(user_id) {
     );
 }
 
-async function exportMonthlyExpenses(user_id) {
+async function exportMonthlyExpenses(user_id, phone) {
     const result = await pool.query(
         `SELECT category, amount, created_at FROM expenses
         WHERE user_id = $1 
@@ -130,12 +130,18 @@ async function exportMonthlyExpenses(user_id) {
     // Make total row bold
     totalRow.getCell("B").font = { bold: true };
     totalRow.getCell("C").font = { bold: true };
+
+    // Format amount to Rupiah currency
     sheet.getColumn("amount").numFmt = '"Rp"#,##0';
 
-    const fileName = `monthly_expenses_${user_id}.xlsx`;
-    const filePath = path.join(__dirname, fileName);
-
+    // Save excel .xlsx
+    const currentMonth = DateTime.now()
+        .setZone("Asia/Bangkok")
+        .toFormat("MM-yyyy");
+    const fileName = `expenses_${currentMonth}_${phone}.xlsx`;
+    const filePath = path.join(__dirname, "tmp", fileName);
     await workbook.xlsx.writeFile(filePath);
+
     return filePath;
 }
 
@@ -266,14 +272,15 @@ async function handleUndo(msg, user_id) {
 
 async function handleExport(msg, user_id) {
     try {
-        const filePath = await exportMonthlyExpenses(user_id);
+        const phone = msg.from.replace(/@c\.us$/, "");
+        const filePath = await exportMonthlyExpenses(user_id, phone);
         const media = MessageMedia.fromFilePath(filePath);
         await msg.reply("📦 Exporting monthly expense Excel files...");
         await client.sendMessage(msg.from, media, {
             sendMediaAsDocument: true,
             caption: "📊 Monthly Expense Report",
         });
-        fs.unlinkSync(filePath); // Clean up
+        fs.unlinkSync(filePath);
         return;
     } catch (err) {
         console.error(err);
@@ -293,6 +300,7 @@ const commands = {
     "/undo": handleUndo,
     "/export": handleExport,
     "/info": handleInfo,
+    "/help": handleInfo,
 };
 
 console.log("🚀 Starting bot...");
@@ -300,7 +308,7 @@ console.log("🚀 Starting bot...");
 // WhatsApp Client Setup
 const client = new Client({
     authStrategy: new LocalAuth({
-        dataPath: "./.wwebjs_auth", // 👈 Forces all session data into this folder
+        dataPath: "./.wwebjs_auth",
     }),
 });
 
@@ -311,11 +319,12 @@ client.on("ready", () => {
 });
 
 client.on("message", async (msg) => {
-    const text = msg.body.trim();
+    const rawText = msg.body.trim();
+    const text = rawText.toLowerCase();
     const phone = msg.from.replace(/@c\.us$/, "");
 
     if (text === "/register") {
-        return handleRegister(msg); // no userId needed
+        return handleRegister(msg);
     }
 
     const user_id = await getUser(phone);
