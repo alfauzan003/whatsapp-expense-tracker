@@ -1,0 +1,12 @@
+const { getMonthlyTotal } = require("../db/expenses");
+const { formatRupiah } = require("../utils/format");
+
+module.exports = async function handleMonthly(msg, user_id) {
+    try {
+        const total = await getMonthlyTotal(user_id);
+        return msg.reply(`📆 *This Month's Total*: ${formatRupiah(total)}`);
+    } catch (err) {
+        console.error(err);
+        return msg.reply("❌ Could not fetch monthly total.");
+    }
+};
